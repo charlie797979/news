@@ -149,13 +149,15 @@ if st.button("🚀 스크랩 시작하기", use_container_width=True):
                     use_container_width=True
                 )
 
-# 5. 우측 하단 고정 푸터 (오류 수정 반영 완료)
+# 📄 5. 디자인 강화형 센터 정렬 하단 푸터 (수정 완료)
+st.markdown("<br><br><br>", unsafe_allow_html=True)  # 버튼과의 적당한 여백 확보
 st.markdown(
     """
-    <style>
-    .footer { position: fixed; right: 25px; bottom: 15px; font-family: Arial; font-weight: bold; font-style: italic; color: #0B192C; font-size: 14px; }
-    </style>
-    <div class="footer">Made by H.C.H.</div>
+    <div style="text-align: center; border-top: 1px solid #E0E0E0; padding-top: 20px;">
+        <span style="font-family: 'Arial', sans-serif; font-size: 13px; color: #888888; letter-spacing: 1px;">
+            Designed & Developed by <strong style="color: #444444; font-style: italic;">H.C.H.</strong>
+        </span>
+    </div>
     """,
     unsafe_allow_html=True
 )
