@@ -3,7 +3,6 @@ import requests
 import pandas as pd
 from datetime import datetime, timedelta, timezone
 import io
-import google.generativeai as genai
 
 # 💡 Streamlit Secrets에서 API 키 불러오기
 try:
@@ -13,10 +12,6 @@ try:
 except Exception:
     st.error("⚠️ Secrets 설정이 올바르지 않습니다. Streamlit Cloud settings의 Secrets에 키 정보를 입력해 주세요.")
     st.stop()
-
-# Gemini 설정
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
 
 # 네이버 뉴스 API 호출
 def get_naver_news_bulk(keyword):
@@ -39,11 +34,14 @@ def get_naver_news_bulk(keyword):
             break
     return all_items
 
-# Gemini를 이용해 잘린 검색 요약문을 완벽한 두 문장으로 재구성
+# requests를 이용한 Gemini REST API 직접 호출 (패키지 설치 불필요)
 def refine_summary_with_gemini(title, desc):
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    headers = {"Content-Type": "application/json"}
+    
     prompt = f"""
     다음은 뉴스 기사의 제목과 요약문입니다. 
-    내용이 중간에 잘렸거나 어색하다면 문맥을 자연스럽게 보완하여 반드시 **완결된 두 문장**으로만 다시 작성해 주세요.
+    내용이 중간에 잘렸거나 어색하다면 문맥을 자연스럽게 보완하여 **정확히 완결된 두 문장**으로 다시 작성해 주세요.
     말줄임표(...)나 불완전한 문장을 사용하지 마시고, 완성된 두 문장만 깔끔하게 출력해 주세요.
 
     [기사 제목]
@@ -52,14 +50,23 @@ def refine_summary_with_gemini(title, desc):
     [기사 요약]
     {desc}
     """
+    
+    payload = {
+        "contents": [{
+            "parts": [{"text": prompt}]
+        }]
+    }
+    
     try:
-        response = model.generate_content(prompt)
-        text = response.text.strip()
-        if text:
-            return text
-        return desc
-    except Exception as e:
-        return desc
+        res = requests.post(url, headers=headers, json=payload, timeout=10)
+        if res.status_code == 200:
+            result = res.json()
+            text = result['candidates'][0]['content']['parts'][0]['text'].strip()
+            if text:
+                return text
+    except Exception:
+        pass
+    return desc
 
 # 🖥️ 웹 화면 레이아웃
 st.set_page_config(page_title="네이버 뉴스 맞춤 스크랩 시스템", page_icon="📰", layout="centered")
