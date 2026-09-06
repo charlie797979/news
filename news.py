@@ -3,7 +3,7 @@ import requests
 import pandas as pd
 from datetime import datetime, timedelta, timezone
 import io
-from google import genai
+import google.generativeai as genai
 
 # 💡 Streamlit Secrets에서 API 키 불러오기
 try:
@@ -14,8 +14,9 @@ except Exception:
     st.error("⚠️ Secrets 설정이 올바르지 않습니다. Streamlit Cloud settings의 Secrets에 키 정보를 입력해 주세요.")
     st.stop()
 
-# Gemini 클라이언트 초기화
-client = genai.Client(api_key=GEMINI_API_KEY)
+# Gemini 설정
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 # 네이버 뉴스 API 호출
 def get_naver_news_bulk(keyword):
@@ -42,7 +43,7 @@ def get_naver_news_bulk(keyword):
 def refine_summary_with_gemini(title, desc):
     prompt = f"""
     다음은 뉴스 기사의 제목과 요약문입니다. 
-    내용이 중간에 잘렸거나 어색하다면 문맥을 자연스럽게 보완하여 **정확히 완결된 두 문장**으로 다시 작성해 주세요.
+    내용이 중간에 잘렸거나 어색하다면 문맥을 자연스럽게 보완하여 반드시 **완결된 두 문장**으로만 다시 작성해 주세요.
     말줄임표(...)나 불완전한 문장을 사용하지 마시고, 완성된 두 문장만 깔끔하게 출력해 주세요.
 
     [기사 제목]
@@ -52,12 +53,12 @@ def refine_summary_with_gemini(title, desc):
     {desc}
     """
     try:
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt,
-        )
-        return response.text.strip()
-    except Exception:
+        response = model.generate_content(prompt)
+        text = response.text.strip()
+        if text:
+            return text
+        return desc
+    except Exception as e:
         return desc
 
 # 🖥️ 웹 화면 레이아웃
@@ -100,7 +101,6 @@ if st.button("🚀 스크랩 시작하기", use_container_width=True):
         st.warning("⚠️ 검색어를 입력해 주세요.")
     else:
         with st.spinner("🔄 뉴스를 수집하고 AI 요약을 생성 중입니다..."):
-            # 입력받은 시간 정보 처리
             start_datetime = datetime.combine(start_date, start_time).replace(tzinfo=KST)
             end_datetime = datetime.combine(end_date, end_time).replace(tzinfo=KST)
             
@@ -113,7 +113,6 @@ if st.button("🚀 스크랩 시작하기", use_container_width=True):
                 desc = item['description'].replace("<b>", "").replace("</b>", "").replace("&quot;", '"').replace("&amp;", '&')
                 
                 pub_date_str = item['pubDate']
-                # 네이버 날짜 파싱 후 KST 타임존 부여
                 pub_date_naive = datetime.strptime(pub_date_str[:-6], "%a, %d %b %Y %H:%M:%S")
                 pub_date = pub_date_naive.replace(tzinfo=timezone.utc).astimezone(KST)
                 
@@ -155,7 +154,6 @@ if st.button("🚀 스크랩 시작하기", use_container_width=True):
                         domain = link.split("//")[-1].split("/")[0]
                         press_name = domain.replace("www.", "").split(".")[0]
 
-                    # AI 두 문장 완결 요약 생성
                     summary_text = refine_summary_with_gemini(title, desc)
                     
                     news_list.append({
