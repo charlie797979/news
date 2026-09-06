@@ -34,10 +34,10 @@ def get_naver_news_bulk(keyword):
             break
     return all_items
 
-# requests를 이용한 Gemini REST API 호출
+# requests를 이용한 Gemini REST API 호출 (404 오류 수정)
 def refine_summary_with_gemini(title, desc):
-    # 최신 Gemini 2.5 Flash Endpoint 적용 (404 오류 해결)
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+    # Gemini 1.5 Flash 공식 REST Endpoint
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
     headers = {"Content-Type": "application/json"}
     
     prompt = f"""
@@ -66,7 +66,7 @@ def refine_summary_with_gemini(title, desc):
             if text:
                 return text, None
         else:
-            return desc, f"API 에러코드: {res.status_code}"
+            return desc, f"API 에러코드: {res.status_code} ({res.text})"
     except Exception as e:
         return desc, f"요약 에러: {str(e)}"
     return desc, "응답 없음"
@@ -179,7 +179,7 @@ if st.button("🚀 스크랩 시작하기", use_container_width=True):
                     })
 
                 if error_logs:
-                    st.error(f"⚠️ Gemini API 호출 중 문제가 발생했습니다: {error_logs[0]} (Streamlit Secrets의 GEMINI_API_KEY를 확인하세요)")
+                    st.error(f"⚠️ Gemini API 호출 중 문제가 발생했습니다: {error_logs[0]}")
 
                 df = pd.DataFrame(news_list)
                 df = df.drop_duplicates(subset=['URL'], keep='first')
