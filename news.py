@@ -34,10 +34,10 @@ def get_naver_news_bulk(keyword):
             break
     return all_items
 
-# requests를 이용한 Gemini REST API 호출 (404 오류 수정)
+# Gemini REST API 호출 (v1 정식 버전 엔드포인트 적용)
 def refine_summary_with_gemini(title, desc):
-    # Gemini 1.5 Flash 공식 REST Endpoint
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    # Google AI Studio 표준 REST Endpoint (v1)
+    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
     headers = {"Content-Type": "application/json"}
     
     prompt = f"""
