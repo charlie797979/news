@@ -34,8 +34,9 @@ def get_naver_news_bulk(keyword):
             break
     return all_items
 
-# requests를 이용한 Gemini REST API 직접 호출 (패키지 설치 불필요)
+# requests를 이용한 Gemini REST API 호출
 def refine_summary_with_gemini(title, desc):
+    # Gemini 1.5 Flash 최신 REST Endpoint
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
     headers = {"Content-Type": "application/json"}
     
@@ -58,15 +59,17 @@ def refine_summary_with_gemini(title, desc):
     }
     
     try:
-        res = requests.post(url, headers=headers, json=payload, timeout=10)
+        res = requests.post(url, headers=headers, json=payload, timeout=5)
         if res.status_code == 200:
             result = res.json()
             text = result['candidates'][0]['content']['parts'][0]['text'].strip()
             if text:
-                return text
-    except Exception:
-        pass
-    return desc
+                return text, None
+        else:
+            return desc, f"API 에러코드: {res.status_code}"
+    except Exception as e:
+        return desc, f"요약 에러: {str(e)}"
+    return desc, "응답 없음"
 
 # 🖥️ 웹 화면 레이아웃
 st.set_page_config(page_title="네이버 뉴스 맞춤 스크랩 시스템", page_icon="📰", layout="centered")
@@ -138,6 +141,8 @@ if st.button("🚀 스크랩 시작하기", use_container_width=True):
                 st.info("ℹ️ 지정한 기간 동안 조건에 맞는 뉴스가 없습니다.")
             else:
                 news_list = []
+                error_logs = []
+                
                 for item, title, desc, pub_date in matched_items:
                     link = item['link']
                     target_url = item['originallink'] if item['originallink'] else link
@@ -161,7 +166,9 @@ if st.button("🚀 스크랩 시작하기", use_container_width=True):
                         domain = link.split("//")[-1].split("/")[0]
                         press_name = domain.replace("www.", "").split(".")[0]
 
-                    summary_text = refine_summary_with_gemini(title, desc)
+                    summary_text, err = refine_summary_with_gemini(title, desc)
+                    if err:
+                        error_logs.append(err)
                     
                     news_list.append({
                         "뉴스 발행시간": pub_date.strftime("%Y-%m-%d %H:%M:%S"),
@@ -170,6 +177,9 @@ if st.button("🚀 스크랩 시작하기", use_container_width=True):
                         "URL": target_url,
                         "뉴스 두 문장 요약": summary_text
                     })
+
+                if error_logs:
+                    st.error(f"⚠️ Gemini API 호출 중 문제가 발생했습니다: {error_logs[0]} (Streamlit Secrets의 GEMINI_API_KEY를 확인하세요)")
 
                 df = pd.DataFrame(news_list)
                 df = df.drop_duplicates(subset=['URL'], keep='first')
@@ -181,7 +191,7 @@ if st.button("🚀 스크랩 시작하기", use_container_width=True):
                     df.to_excel(writer, index=False)
                 excel_data.seek(0)
                 
-                st.success(f"✨ 총 {len(df)}건 스크랩 및 AI 요약 완료!")
+                st.success(f"✨ 총 {len(df)}건 스크랩 처리 완료!")
                 
                 file_name = f"{keyword}_뉴스_{now_dt.strftime('%Y-%m-%d_%H%M')}.xlsx"
                 st.download_button(
