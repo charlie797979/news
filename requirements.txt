@@ -2,5 +2,3 @@ streamlit
 requests
 pandas
 openpyxl
-beautifulsoup4
-google-genai
