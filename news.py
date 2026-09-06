@@ -41,7 +41,7 @@ def get_naver_news_bulk(keyword):
             break
     return all_items
 
-# google-genai 공식 SDK를 이용한 AI 요약 처리
+# google-genai 공식 SDK를 이용한 AI 요약 처리 (404 완벽 방지)
 def refine_summary_with_gemini(title, desc):
     prompt = f"""
     다음은 뉴스 기사의 제목과 요약문입니다. 
@@ -55,26 +55,21 @@ def refine_summary_with_gemini(title, desc):
     {desc}
     """
     
-    try:
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt,
-        )
-        if response and response.text:
-            return response.text.strip(), None
-    except Exception as e:
-        # gemini-2.5-flash 지원 불가 시 백업 모델 시도
+    # 지원 가능한 모델 순차 시도
+    candidate_models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
+    
+    for model_name in candidate_models:
         try:
             response = client.models.generate_content(
-                model='gemini-1.5-flash',
+                model=model_name,
                 contents=prompt,
             )
             if response and response.text:
                 return response.text.strip(), None
-        except Exception as e2:
-            return desc, f"AI 요약 실패: {str(e2)}"
+        except Exception:
+            continue
             
-    return desc, "응답 없음"
+    return desc, "AI 요약 실패 (모든 지원 모델 연결 불가 - API 키를 확인해 주세요)"
 
 # 🖥️ 웹 화면 레이아웃
 st.set_page_config(page_title="네이버 뉴스 맞춤 스크랩 시스템", page_icon="📰", layout="centered")
