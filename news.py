@@ -34,7 +34,7 @@ def get_naver_news_bulk(keyword):
             break
     return all_items
 
-# 💡 REST API 직접 호출 방식 (AQ.Ab... 형식 키 완벽 지원)
+# 💡 REST API 직접 호출 및 최신 Gemini 3.6 Flash 모델 적용
 def refine_summary_with_gemini(title, desc):
     prompt = f"""
     다음은 뉴스 기사의 제목과 요약문입니다. 
@@ -48,8 +48,8 @@ def refine_summary_with_gemini(title, desc):
     {desc}
     """
     
-    # 순차 시도할 모델 버전 목록
-    models_to_try = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-2.5-flash"]
+    # 구글 최신 안내 기준 모델(gemini-3.6-flash) 순차 호출
+    models_to_try = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-1.5-flash"]
     last_error_msg = ""
 
     for model_name in models_to_try:
@@ -222,3 +222,4 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
