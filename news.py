@@ -40,7 +40,7 @@ def get_naver_news_bulk(keyword):
             break
     return all_items
 
-# 1. URL에서 기사 본문 텍스트 추출하는 함수
+# 1. URL에서 기사 본문 텍스트 추출 (네이버 뉴스 본문 구조 보완)
 def fetch_article_text(url):
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -49,22 +49,29 @@ def fetch_article_text(url):
         res = requests.get(url, headers=headers, timeout=5)
         if res.status_code == 200:
             soup = BeautifulSoup(res.text, 'html.parser')
-            # 불필요한 태그 제거
-            for script in soup(["script", "style", "header", "footer", "nav"]):
+            
+            # 네이버 뉴스 특화 본문 추출
+            article = soup.select_one('#newsct_article') or soup.select_one('#articleBodyContents')
+            if article:
+                for target in article(["script", "style", "span", "a"]):
+                    target.decompose()
+                return article.get_text(separator=' ', strip=True)[:2500]
+            
+            # 일반 언론사 사이트 추출
+            for script in soup(["script", "style", "header", "footer", "nav", "iframe"]):
                 script.decompose()
-            text = soup.get_text(separator=' ', strip=True)
-            return text[:2500]  # 속도를 위해 상위 2,500자만 사용
+            return soup.get_text(separator=' ', strip=True)[:2500]
     except Exception:
         pass
     return ""
 
-# 2. Gemini API를 활용한 두 문장 요약 함수
+# 2. Gemini API 두 문장 요약
 def summarize_with_gemini(title, text, fallback_desc):
-    content_to_summarize = text if len(text) > 200 else f"제목: {title}\n요약문: {fallback_desc}"
+    content_to_summarize = text if len(text) > 150 else f"제목: {title}\n요약문: {fallback_desc}"
     
     prompt = f"""
-    다음 뉴스 기사 내용을 읽고 가장 중요한 핵심 내용을 정확히 **두 문장**으로 요약해 주세요.
-    다른 서론이나 부연 설명 없이, 오직 요약된 두 문장만 출력하세요.
+    다음 뉴스 기사 내용을 읽고 가장 중요한 핵심 내용을 정확히 한국어 **두 문장**으로 요약해 주세요.
+    말줄임표(...)나 불완전한 문장을 쓰지 말고, 완성된 두 문장만 깔끔하게 출력하세요.
 
     [기사 내용]
     {content_to_summarize}
@@ -79,20 +86,20 @@ def summarize_with_gemini(title, text, fallback_desc):
     except Exception:
         return fallback_desc
 
-# 🖥️ 웹 화면 레이아웃 구성
+# 🖥️ 웹 화면 레이아웃
 st.set_page_config(page_title="네이버 뉴스 맞춤 스크랩 시스템", page_icon="📰", layout="centered")
 
 st.title("📰 네이버 뉴스 맞춤 스크랩 시스템")
 st.write("키워드와 기간을 선택한 후 스크랩을 진행하세요. 결과는 엑셀 파일로 즉시 다운로드됩니다.")
 
-# 1. 검색 키워드 입력 (기본값: 셀바이오휴먼텍)
+# 1. 검색 키워드 입력
 keyword = st.text_input("검색 키워드", value="셀바이오휴먼텍", placeholder="예: 셀바이오휴먼텍").strip()
 
 # 날짜/시간 자동 계산 (전일 13:00 ~ 현재)
 now_dt = datetime.now()
 yesterday_13pm = (now_dt - timedelta(days=1)).replace(hour=13, minute=0, second=0, microsecond=0)
 
-# 2. 기간 및 시간 설정 입력
+# 2. 기간 및 시간 설정
 col1, col2 = st.columns(2)
 with col1:
     start_date = st.date_input("시작 날짜", yesterday_13pm.date())
@@ -101,7 +108,7 @@ with col2:
     end_date = st.date_input("종료 날짜", now_dt.date())
     end_time = st.time_input("종료 시간", now_dt.time())
 
-# 3. 검색 조건 선택
+# 3. 검색 조건
 search_mode = st.radio(
     "검색 조건 선택",
     ("키워드 완벽일치 (문구가 정확히 일치하는 뉴스만)", "키워드 모두 포함 (띄어쓰기 된 단어들이 모두 포함된 뉴스)"),
@@ -110,7 +117,7 @@ search_mode = st.radio(
 
 st.markdown("---")
 
-# 4. 스크랩 실행 버튼 및 로직
+# 4. 스크랩 시작
 if st.button("🚀 스크랩 시작하기", use_container_width=True):
     if not keyword:
         st.warning("⚠️ 검색어를 입력해 주세요.")
@@ -123,7 +130,6 @@ if st.button("🚀 스크랩 시작하기", use_container_width=True):
             items = get_naver_news_bulk(keyword)
             news_list = []
             
-            # 대상 기사 필터링
             matched_items = []
             for item in items:
                 title = item['title'].replace("<b>", "").replace("</b>", "").replace("&quot;", '"').replace("&amp;", '&')
@@ -151,7 +157,8 @@ if st.button("🚀 스크랩 시작하기", use_container_width=True):
 
                 for idx, (item, title, desc, pub_date) in enumerate(matched_items):
                     link = item['link']
-                    target_url = item['originallink'] if item['originallink'] else link
+                    # 네이버 뉴스 링크를 우선 사용하여 본문 추출 성공률 극대화
+                    target_url = link if "naver.com" in link else (item['originallink'] if item['originallink'] else link)
                     
                     # 언론사명 판별
                     press_name = "기타언론"
@@ -173,7 +180,7 @@ if st.button("🚀 스크랩 시작하기", use_container_width=True):
                         domain = link.split("//")[-1].split("/")[0]
                         press_name = domain.replace("www.", "").split(".")[0]
 
-                    # 본문 크롤링 및 Gemini 요약
+                    # 본문 수집 및 Gemini 요약
                     article_text = fetch_article_text(target_url)
                     summary_text = summarize_with_gemini(title, article_text, desc)
                     
@@ -181,7 +188,7 @@ if st.button("🚀 스크랩 시작하기", use_container_width=True):
                         "뉴스 발행시간": pub_date.strftime("%Y-%m-%d %H:%M:%S"),
                         "언론사명": press_name,
                         "뉴스 제목": title,
-                        "URL": target_url,
+                        "URL": item['originallink'] if item['originallink'] else link,
                         "뉴스 두 문장 요약": summary_text
                     })
                     
@@ -192,7 +199,6 @@ if st.button("🚀 스크랩 시작하기", use_container_width=True):
                 df = df.sort_values(by="뉴스 발행시간", ascending=True)
                 df = df[["뉴스 발행시간", "언론사명", "뉴스 제목", "URL", "뉴스 두 문장 요약"]]
                 
-                # 메모리 스트림으로 엑셀 변환
                 excel_data = io.BytesIO()
                 with pd.ExcelWriter(excel_data, engine='openpyxl') as writer:
                     df.to_excel(writer, index=False)
@@ -209,7 +215,7 @@ if st.button("🚀 스크랩 시작하기", use_container_width=True):
                     use_container_width=True
                 )
 
-# 📄 5. 하단 푸터
+# 📄 푸터
 st.markdown("<br><br><br>", unsafe_allow_html=True)
 st.markdown(
     """
