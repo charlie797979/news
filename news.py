@@ -3,6 +3,7 @@ import requests
 import pandas as pd
 from datetime import datetime, timedelta, timezone
 import io
+from google import genai
 
 # 💡 Streamlit Secrets에서 API 키 불러오기
 try:
@@ -12,6 +13,12 @@ try:
 except Exception:
     st.error("⚠️ Secrets 설정이 올바르지 않습니다. Streamlit Cloud settings의 Secrets에 키 정보를 입력해 주세요.")
     st.stop()
+
+# Gemini 공식 클라이언트 생성
+try:
+    client = genai.Client(api_key=GEMINI_API_KEY)
+except Exception as e:
+    st.error(f"⚠️ Gemini 클라이언트 생성 실패: {str(e)}")
 
 # 네이버 뉴스 API 호출
 def get_naver_news_bulk(keyword):
@@ -34,12 +41,8 @@ def get_naver_news_bulk(keyword):
             break
     return all_items
 
-# Gemini REST API 호출 (v1 정식 버전 엔드포인트 적용)
+# google-genai 공식 SDK를 이용한 AI 요약 처리
 def refine_summary_with_gemini(title, desc):
-    # Google AI Studio 표준 REST Endpoint (v1)
-    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-    headers = {"Content-Type": "application/json"}
-    
     prompt = f"""
     다음은 뉴스 기사의 제목과 요약문입니다. 
     내용이 중간에 잘렸거나 어색하다면 문맥을 자연스럽게 보완하여 **정확히 완결된 두 문장**으로 다시 작성해 주세요.
@@ -52,23 +55,25 @@ def refine_summary_with_gemini(title, desc):
     {desc}
     """
     
-    payload = {
-        "contents": [{
-            "parts": [{"text": prompt}]
-        }]
-    }
-    
     try:
-        res = requests.post(url, headers=headers, json=payload, timeout=10)
-        if res.status_code == 200:
-            result = res.json()
-            text = result['candidates'][0]['content']['parts'][0]['text'].strip()
-            if text:
-                return text, None
-        else:
-            return desc, f"API 에러코드: {res.status_code} ({res.text})"
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+        )
+        if response and response.text:
+            return response.text.strip(), None
     except Exception as e:
-        return desc, f"요약 에러: {str(e)}"
+        # gemini-2.5-flash 지원 불가 시 백업 모델 시도
+        try:
+            response = client.models.generate_content(
+                model='gemini-1.5-flash',
+                contents=prompt,
+            )
+            if response and response.text:
+                return response.text.strip(), None
+        except Exception as e2:
+            return desc, f"AI 요약 실패: {str(e2)}"
+            
     return desc, "응답 없음"
 
 # 🖥️ 웹 화면 레이아웃
@@ -179,7 +184,7 @@ if st.button("🚀 스크랩 시작하기", use_container_width=True):
                     })
 
                 if error_logs:
-                    st.error(f"⚠️ Gemini API 호출 중 문제가 발생했습니다: {error_logs[0]}")
+                    st.error(f"⚠️ Gemini API 오류 발생: {error_logs[0]}")
 
                 df = pd.DataFrame(news_list)
                 df = df.drop_duplicates(subset=['URL'], keep='first')
