@@ -36,8 +36,8 @@ def get_naver_news_bulk(keyword):
 
 # requests를 이용한 Gemini REST API 호출
 def refine_summary_with_gemini(title, desc):
-    # Gemini 1.5 Flash 최신 REST Endpoint
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    # 최신 Gemini 2.5 Flash Endpoint 적용 (404 오류 해결)
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
     headers = {"Content-Type": "application/json"}
     
     prompt = f"""
@@ -59,7 +59,7 @@ def refine_summary_with_gemini(title, desc):
     }
     
     try:
-        res = requests.post(url, headers=headers, json=payload, timeout=5)
+        res = requests.post(url, headers=headers, json=payload, timeout=10)
         if res.status_code == 200:
             result = res.json()
             text = result['candidates'][0]['content']['parts'][0]['text'].strip()
