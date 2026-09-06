@@ -3,7 +3,6 @@ import requests
 import pandas as pd
 from datetime import datetime, timedelta, timezone
 import io
-from google import genai
 
 # 💡 Streamlit Secrets에서 API 키 불러오기
 try:
@@ -13,12 +12,6 @@ try:
 except Exception:
     st.error("⚠️ Secrets 설정이 올바르지 않습니다. Streamlit Cloud settings의 Secrets에 키 정보를 입력해 주세요.")
     st.stop()
-
-# Gemini 공식 클라이언트 생성
-try:
-    client = genai.Client(api_key=GEMINI_API_KEY)
-except Exception as e:
-    st.error(f"⚠️ Gemini 클라이언트 생성 실패: {str(e)}")
 
 # 네이버 뉴스 API 호출
 def get_naver_news_bulk(keyword):
@@ -41,7 +34,7 @@ def get_naver_news_bulk(keyword):
             break
     return all_items
 
-# google-genai 공식 SDK를 이용한 AI 요약 처리 (404 완벽 방지)
+# 💡 REST API 직접 호출 방식 (AQ.Ab... 형식 키 완벽 지원)
 def refine_summary_with_gemini(title, desc):
     prompt = f"""
     다음은 뉴스 기사의 제목과 요약문입니다. 
@@ -55,21 +48,36 @@ def refine_summary_with_gemini(title, desc):
     {desc}
     """
     
-    # 지원 가능한 모델 순차 시도
-    candidate_models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
-    
-    for model_name in candidate_models:
+    # 순차 시도할 모델 버전 목록
+    models_to_try = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-2.5-flash"]
+    last_error_msg = ""
+
+    for model_name in models_to_try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY.strip()}"
+        headers = {"Content-Type": "application/json"}
+        payload = {
+            "contents": [
+                {
+                    "parts": [{"text": prompt}]
+                }
+            ]
+        }
+        
         try:
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt,
-            )
-            if response and response.text:
-                return response.text.strip(), None
-        except Exception:
-            continue
+            res = requests.post(url, headers=headers, json=payload, timeout=10)
+            data = res.json()
             
-    return desc, "AI 요약 실패 (모든 지원 모델 연결 불가 - API 키를 확인해 주세요)"
+            if res.status_code == 200 and "candidates" in data:
+                text = data["candidates"][0]["content"]["parts"][0]["text"]
+                return text.strip(), None
+            else:
+                error_info = data.get("error", {}).get("message", res.text)
+                last_error_msg = f"[{model_name}] {error_info}"
+        except Exception as e:
+            last_error_msg = str(e)
+            continue
+
+    return desc, f"AI 요약 실패: {last_error_msg}"
 
 # 🖥️ 웹 화면 레이아웃
 st.set_page_config(page_title="네이버 뉴스 맞춤 스크랩 시스템", page_icon="📰", layout="centered")
@@ -167,7 +175,7 @@ if st.button("🚀 스크랩 시작하기", use_container_width=True):
                         press_name = domain.replace("www.", "").split(".")[0]
 
                     summary_text, err = refine_summary_with_gemini(title, desc)
-                    if err:
+                    if err and err not in error_logs:
                         error_logs.append(err)
                     
                     news_list.append({
