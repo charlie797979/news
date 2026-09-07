@@ -39,9 +39,10 @@ st.write("키워드와 기간을 선택한 후 스크랩을 진행하세요. 결
 # 1. 검색 키워드 입력
 keyword = st.text_input("검색 키워드", placeholder="예: 글로벌 채용").strip()
 
-# 기본 날짜/시간 설정 (시작: 전날 13:00, 종료: 현재 시각)
-now_dt = datetime.now()
+# 한국 시간(KST = UTC + 9시간) 기준으로 현재 시각 보정
+now_dt = datetime.utcnow() + timedelta(hours=9)
 yesterday_dt = now_dt - timedelta(days=1)
+
 default_start_time = dttime(13, 0)
 default_end_time = now_dt.time()
 
