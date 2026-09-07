@@ -9,28 +9,10 @@ import google.generativeai as genai
 CLIENT_ID = "JKZCSpCJtgKVj7pO4Uj7"
 CLIENT_SECRET = "UANQpOV5hX"
 
-# 💡 2. Gemini API 키 불러오기 및 동적 모델 탐색
+# 💡 2. Gemini API 키 불러오기
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
-WORKING_MODEL = None
-
 if GEMINI_API_KEY:
-    try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        # 내 계정/키에서 사용 가능한 모델 목록을 자동 조회
-        available_models = [
-            m.name for m in genai.list_models() 
-            if 'generateContent' in m.supported_generation_methods
-        ]
-        
-        # flash 모델 우선 선택, 없으면 첫 번째 사용 가능 모델 선택
-        for m in available_models:
-            if 'flash' in m:
-                WORKING_MODEL = m
-                break
-        if not WORKING_MODEL and available_models:
-            WORKING_MODEL = available_models[0]
-    except Exception as e:
-        WORKING_MODEL = None
+    genai.configure(api_key=GEMINI_API_KEY)
 
 def get_naver_news_bulk(keyword):
     url = "https://openapi.naver.com/v1/search/news.json"
@@ -55,11 +37,6 @@ def get_naver_news_bulk(keyword):
 
 # 뉴스 URL 본문 크롤링 및 Gemini 2문장 요약 함수
 def summarize_news(url, description):
-    if not GEMINI_API_KEY:
-        return "실패: API 키 미설정"
-    if not WORKING_MODEL:
-        return "실패: 사용할 수 있는 Gemini 모델이 없음"
-
     content = ""
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
@@ -71,18 +48,25 @@ def summarize_news(url, description):
     except Exception:
         pass
     
+    # 크롤링 실패 시 기본 description 사용
     if not content or len(content) < 50:
         content = description
 
     prompt = f"다음 뉴스 내용을 정확히 두 문장으로 핵심만 간결하게 요약해 주세요:\n\n{content}"
     
+    if not GEMINI_API_KEY:
+        return f"[기본요약] {description}"
+
+    # 모델 생성 방식 보완
     try:
-        model = genai.GenerativeModel(WORKING_MODEL)
+        # SDK 엔드포인트 수정을 위한 GenerativeModel 직접 선언
+        model = genai.GenerativeModel('gemini-1.5-flash')
         response = model.generate_content(prompt)
-        time.sleep(0.5) # API 속도 제한 방지
+        time.sleep(0.4)
         return response.text.strip()
     except Exception as e:
-        return f"요약 실패({type(e).__name__})"
+        # NotFound 등 API 오류 시 무조건 실패 처리하는 대신 기본 description 반환
+        return f"[요약 대체] {description}"
 
 # 🖥️ 웹 화면 레이아웃 구성
 st.set_page_config(page_title="네이버 뉴스 맞춤 스크랩 시스템", page_icon="📰", layout="centered")
