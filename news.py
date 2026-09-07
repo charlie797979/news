@@ -9,10 +9,28 @@ import google.generativeai as genai
 CLIENT_ID = "JKZCSpCJtgKVj7pO4Uj7"
 CLIENT_SECRET = "UANQpOV5hX"
 
-# 💡 2. Gemini API 키 불러오기
+# 💡 2. Gemini API 키 불러오기 및 동적 모델 탐색
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
+WORKING_MODEL = None
+
 if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        # 내 계정/키에서 사용 가능한 모델 목록을 자동 조회
+        available_models = [
+            m.name for m in genai.list_models() 
+            if 'generateContent' in m.supported_generation_methods
+        ]
+        
+        # flash 모델 우선 선택, 없으면 첫 번째 사용 가능 모델 선택
+        for m in available_models:
+            if 'flash' in m:
+                WORKING_MODEL = m
+                break
+        if not WORKING_MODEL and available_models:
+            WORKING_MODEL = available_models[0]
+    except Exception as e:
+        WORKING_MODEL = None
 
 def get_naver_news_bulk(keyword):
     url = "https://openapi.naver.com/v1/search/news.json"
@@ -39,6 +57,8 @@ def get_naver_news_bulk(keyword):
 def summarize_news(url, description):
     if not GEMINI_API_KEY:
         return "실패: API 키 미설정"
+    if not WORKING_MODEL:
+        return "실패: 사용할 수 있는 Gemini 모델이 없음"
 
     content = ""
     try:
@@ -56,19 +76,13 @@ def summarize_news(url, description):
 
     prompt = f"다음 뉴스 내용을 정확히 두 문장으로 핵심만 간결하게 요약해 주세요:\n\n{content}"
     
-    # 사용할 모델명 후보 (지원되는 정확한 모델명을 순차적으로 시도)
-    target_models = ['gemini-2.5-flash', 'models/gemini-1.5-flash', 'gemini-1.5-flash-latest']
-    
-    for model_name in target_models:
-        try:
-            model = genai.GenerativeModel(model_name)
-            response = model.generate_content(prompt)
-            time.sleep(0.5) # API 호출 제한 방지
-            return response.text.strip()
-        except Exception:
-            continue
-
-    return "요약 실패(모델을 찾을 수 없음)"
+    try:
+        model = genai.GenerativeModel(WORKING_MODEL)
+        response = model.generate_content(prompt)
+        time.sleep(0.5) # API 속도 제한 방지
+        return response.text.strip()
+    except Exception as e:
+        return f"요약 실패({type(e).__name__})"
 
 # 🖥️ 웹 화면 레이아웃 구성
 st.set_page_config(page_title="네이버 뉴스 맞춤 스크랩 시스템", page_icon="📰", layout="centered")
