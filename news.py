@@ -5,15 +5,16 @@ import streamlit as st
 from bs4 import BeautifulSoup
 import google.generativeai as genai
 
-# 💡 본인의 네이버 API 및 Gemini API 키 설정
+# 💡 1. 네이버 API 키 설정
 CLIENT_ID = "JKZCSpCJtgKVj7pO4Uj7"
 CLIENT_SECRET = "UANQpOV5hX"
-# 💡 Streamlit Secrets에서 API 키를 안전하게 불러옵니다
-GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 
-# Gemini API 설정
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+# 💡 2. Gemini API 키 불러오기 (Streamlit Secrets 사용)
+try:
+    GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+    genai.configure(api_key=GEMINI_API_KEY)
+except Exception:
+    st.error("⚠️ Streamlit Secrets에 'GEMINI_API_KEY'가 설정되지 않았습니다.")
 
 def get_naver_news_bulk(keyword):
     url = "https://openapi.naver.com/v1/search/news.json"
@@ -32,7 +33,7 @@ def get_naver_news_bulk(keyword):
                 time.sleep(0.1) 
             else:
                 break
-        except:
+        except Exception:
             break
     return all_items
 
@@ -41,25 +42,31 @@ def summarize_news(url, description):
     content = ""
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-        res = requests.get(url, headers=headers, timeout=5)
+        res = requests.get(url, headers=headers, timeout=3)
         if res.status_code == 200:
             soup = BeautifulSoup(res.text, 'html.parser')
-            # 일반적인 기사 본문 태그 추출 시도
             paragraphs = soup.find_all('p')
             content = " ".join([p.get_text().strip() for p in paragraphs if len(p.get_text().strip()) > 30])
-    except:
+    except Exception:
         pass
     
     # 크롤링 실패 시 API가 기본 제공하는 description 활용
     if not content or len(content) < 50:
         content = description
 
-    prompt = f"다음 뉴스 내용을 정확히 '두 문장'으로 핵심만 간결하게 요약해 주세요:\n\n{content}"
-    try:
-        response = model.generate_content(prompt)
-        return response.text.strip()
-    except Exception as e:
-        return "요약 생성 실패"
+    prompt = f"다음 뉴스 내용을 정확히 두 문장으로 핵심만 간결하게 요약해 주세요:\n\n{content}"
+    
+    # Gemini 모델 호환성 처리 (gemini-2.5-flash / gemini-1.5-flash)
+    for model_name in ['gemini-2.5-flash', 'gemini-1.5-flash']:
+        try:
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(prompt)
+            time.sleep(0.5) # API 속도 제한 방지 대기
+            return response.text.strip()
+        except Exception:
+            continue
+            
+    return "요약 생성 실패"
 
 # 🖥️ 웹 화면 레이아웃 구성
 st.set_page_config(page_title="네이버 뉴스 맞춤 스크랩 시스템", page_icon="📰", layout="centered")
