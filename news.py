@@ -35,7 +35,7 @@ def get_naver_news_bulk(keyword):
             break
     return all_items
 
-# 뉴스 URL 본문 크롤링 및 Gemini 2문장 요약 함수 (에러 상세 출력)
+# 뉴스 URL 본문 크롤링 및 Gemini 2문장 요약 함수
 def summarize_news(url, description):
     if not GEMINI_API_KEY:
         return "실패: API 키 미설정"
@@ -56,22 +56,19 @@ def summarize_news(url, description):
 
     prompt = f"다음 뉴스 내용을 정확히 두 문장으로 핵심만 간결하게 요약해 주세요:\n\n{content}"
     
-    try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content(prompt)
-        time.sleep(0.5)
-        return response.text.strip()
-    except Exception as e:
-        # 발생한 구체적 에러 메시지를 반환합니다.
-        err_msg = str(e)
-        if "API_KEY_INVALID" in err_msg or "API key not found" in err_msg:
-            return "실패: API 키 오류"
-        elif "RESOURCE_EXHAUSTED" in err_msg or "429" in err_msg:
-            return "실패: 호출 한도 초과"
-        elif "SERVICE_DISABLED" in err_msg or "PERMISSION_DENIED" in err_msg:
-            return "실패: API 서비스 미활성화"
-        else:
-            return f"실패: {type(e).__name__}"
+    # 사용할 모델명 후보 (지원되는 정확한 모델명을 순차적으로 시도)
+    target_models = ['gemini-2.5-flash', 'models/gemini-1.5-flash', 'gemini-1.5-flash-latest']
+    
+    for model_name in target_models:
+        try:
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(prompt)
+            time.sleep(0.5) # API 호출 제한 방지
+            return response.text.strip()
+        except Exception:
+            continue
+
+    return "요약 실패(모델을 찾을 수 없음)"
 
 # 🖥️ 웹 화면 레이아웃 구성
 st.set_page_config(page_title="네이버 뉴스 맞춤 스크랩 시스템", page_icon="📰", layout="centered")
@@ -162,7 +159,6 @@ if st.button("🚀 스크랩 시작하기", use_container_width=True):
                         is_matched = True
 
                 if is_matched and (start_datetime <= pub_date <= end_datetime):
-                    # Gemini 요약 수행
                     summary = summarize_news(link, desc)
                     
                     news_list.append({
