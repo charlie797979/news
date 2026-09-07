@@ -1,13 +1,19 @@
-import streamlit as st
-import requests
-import pandas as pd
+import os, requests, pandas as pd
 from datetime import datetime, timedelta, time as dttime
-import time
-import io
+import time, io
+import streamlit as st
+from bs4 import BeautifulSoup
+import google.generativeai as genai
 
-# 💡 본인의 네이버 API 키 설정
+# 💡 본인의 네이버 API 및 Gemini API 키 설정
 CLIENT_ID = "JKZCSpCJtgKVj7pO4Uj7"
 CLIENT_SECRET = "UANQpOV5hX"
+# 💡 Streamlit Secrets에서 API 키를 안전하게 불러옵니다
+GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+
+# Gemini API 설정
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 def get_naver_news_bulk(keyword):
     url = "https://openapi.naver.com/v1/search/news.json"
@@ -30,23 +36,48 @@ def get_naver_news_bulk(keyword):
             break
     return all_items
 
+# 뉴스 URL 본문 크롤링 및 Gemini 2문장 요약 함수
+def summarize_news(url, description):
+    content = ""
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        res = requests.get(url, headers=headers, timeout=5)
+        if res.status_code == 200:
+            soup = BeautifulSoup(res.text, 'html.parser')
+            # 일반적인 기사 본문 태그 추출 시도
+            paragraphs = soup.find_all('p')
+            content = " ".join([p.get_text().strip() for p in paragraphs if len(p.get_text().strip()) > 30])
+    except:
+        pass
+    
+    # 크롤링 실패 시 API가 기본 제공하는 description 활용
+    if not content or len(content) < 50:
+        content = description
+
+    prompt = f"다음 뉴스 내용을 정확히 '두 문장'으로 핵심만 간결하게 요약해 주세요:\n\n{content}"
+    try:
+        response = model.generate_content(prompt)
+        return response.text.strip()
+    except Exception as e:
+        return "요약 생성 실패"
+
 # 🖥️ 웹 화면 레이아웃 구성
 st.set_page_config(page_title="네이버 뉴스 맞춤 스크랩 시스템", page_icon="📰", layout="centered")
 
 st.title("📰 네이버 뉴스 맞춤 스크랩 시스템")
-st.write("키워드와 기간을 선택한 후 스크랩을 진행하세요. 결과는 엑셀 파일로 즉시 다운로드됩니다.")
+st.write("키워드와 기간을 선택한 후 스크랩을 진행하세요. Gemini가 뉴스를 2문장으로 요약해 줍니다.")
 
 # 1. 검색 키워드 입력
 keyword = st.text_input("검색 키워드", placeholder="예: 글로벌 채용").strip()
 
-# 한국 시간(KST = UTC + 9시간) 기준으로 현재 시각 보정
+# 한국 시간(KST = UTC + 9시간) 기준 시각 보정
 now_dt = datetime.utcnow() + timedelta(hours=9)
 yesterday_dt = now_dt - timedelta(days=1)
 
 default_start_time = dttime(13, 0)
 default_end_time = now_dt.time()
 
-# 2. 기간 및 시간 설정 입력 (날짜 + 시간 분할 레이아웃)
+# 2. 기간 및 시간 설정 입력
 col1, col2, col3, col4 = st.columns([2, 1.5, 2, 1.5])
 
 with col1:
@@ -73,8 +104,7 @@ if st.button("🚀 스크랩 시작하기", use_container_width=True):
     if not keyword:
         st.warning("⚠️ 검색어를 입력해 주세요.")
     else:
-        with st.spinner("🔄 데이터를 수집 중입니다... 잠시만 기다려주세요."):
-            # 선택한 날짜와 시간을 결합하여 datetime 객체 생성
+        with st.spinner("🔄 데이터를 수집하고 Gemini로 뉴스를 요약 중입니다..."):
             start_datetime = datetime.combine(start_date, start_time)
             end_datetime = datetime.combine(end_date, end_time)
             
@@ -86,7 +116,7 @@ if st.button("🚀 스크랩 시작하기", use_container_width=True):
                 title = item['title'].replace("<b>", "").replace("</b>", "").replace("&quot;", '"').replace("&amp;", '&')
                 desc = item['description'].replace("<b>", "").replace("</b>", "").replace("&quot;", '"').replace("&amp;", '&')
                 
-                link = item['link']
+                link = item['originallink'] if item['originallink'] else item['link']
                 press_name = "기타언론"
                 
                 if "naver.com" in link: press_name = "네이버뉴스"
@@ -108,7 +138,6 @@ if st.button("🚀 스크랩 시작하기", use_container_width=True):
                     press_name = domain.replace("www.", "").split(".")[0]
 
                 pub_date_str = item['pubDate']
-                # 네이버 API UTC 기준 시각을 한국 시간(KST, +9시간)으로 보정
                 pub_date_utc = datetime.strptime(pub_date_str[:-6], "%a, %d %b %Y %H:%M:%S")
                 pub_date = pub_date_utc + timedelta(hours=9)
                 
@@ -120,14 +149,17 @@ if st.button("🚀 스크랩 시작하기", use_container_width=True):
                     if all(word in title or word in desc for word in keyword_words):
                         is_matched = True
 
-                if is_matched:
-                    if start_datetime <= pub_date <= end_datetime:
-                        news_list.append({
-                            "뉴스 발행시간": pub_date.strftime("%Y-%m-%d %H:%M"),
-                            "언론사명": press_name,
-                            "뉴스 제목": title,
-                            "URL": item['originallink'] if item['originallink'] else item['link']
-                        })
+                if is_matched and (start_datetime <= pub_date <= end_datetime):
+                    # Gemini 요약 수행
+                    summary = summarize_news(link, desc)
+                    
+                    news_list.append({
+                        "뉴스 발행시간": pub_date.strftime("%Y-%m-%d %H:%M"),
+                        "언론사명": press_name,
+                        "뉴스 제목": title,
+                        "URL": link,
+                        "뉴스 요약": summary
+                    })
             
             if not news_list:
                 st.info(f"ℹ️ {start_datetime.strftime('%Y-%m-%d %H:%M')} ~ {end_datetime.strftime('%Y-%m-%d %H:%M')} 기간 동안 조건에 맞는 뉴스가 없습니다.")
@@ -135,14 +167,14 @@ if st.button("🚀 스크랩 시작하기", use_container_width=True):
                 df = pd.DataFrame(news_list)
                 df = df.drop_duplicates(subset=['URL'], keep='first')
                 df = df.sort_values(by="뉴스 발행시간", ascending=True)
-                df = df[["뉴스 발행시간", "언론사명", "뉴스 제목", "URL"]]
+                df = df[["뉴스 발행시간", "언론사명", "뉴스 제목", "URL", "뉴스 요약"]]
                 
                 excel_data = io.BytesIO()
                 with pd.ExcelWriter(excel_data, engine='openpyxl') as writer:
                     df.to_excel(writer, index=False)
                 excel_data.seek(0)
                 
-                st.success(f"✨ 총 {len(df)}건의 뉴스 스크랩 완료!")
+                st.success(f"✨ 총 {len(df)}건의 뉴스 스크랩 및 AI 요약 완료!")
                 
                 file_name = f"{keyword}_뉴스_{now_dt.strftime('%Y-%m-%d_%H%M')}.xlsx"
                 st.download_button(
