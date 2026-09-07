@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time as dttime
 import time
 import io
 
@@ -39,23 +39,26 @@ st.write("키워드와 기간을 선택한 후 스크랩을 진행하세요. 결
 # 1. 검색 키워드 입력
 keyword = st.text_input("검색 키워드", placeholder="예: 글로벌 채용").strip()
 
-# 날짜 자동 계산 (지난주 토요일 ~ 오늘)
+# 기본 날짜/시간 설정 (시작: 전날 13:00, 종료: 현재 시각)
 now_dt = datetime.now()
-current_weekday = now_dt.weekday()
-if current_weekday == 6:
-    days_to_last_saturday = 8
-else:
-    days_to_last_saturday = current_weekday + 2
-last_saturday = now_dt - timedelta(days=days_to_last_saturday)
+yesterday_dt = now_dt - timedelta(days=1)
+default_start_time = dttime(13, 0)
+default_end_time = now_dt.time()
 
-# 2. 기간 설정 입력 (달력 팝업)
-col1, col2 = st.columns(2)
+# 2. 기간 및 시간 설정 입력 (날짜 + 시간 분할 레이아웃)
+col1, col2, col3, col4 = st.columns([2, 1.5, 2, 1.5])
+
 with col1:
-    start_date = st.date_input("시작 날짜", last_saturday)
+    start_date = st.date_input("시작 날짜", yesterday_dt)
 with col2:
-    end_date = st.date_input("종료 날짜", now_dt)
+    start_time = st.time_input("시작 시간", default_start_time)
 
-# 3. 검색 조건 선택 (라디오 버튼 - 모바일 터치 최적화 크기)
+with col3:
+    end_date = st.date_input("종료 날짜", now_dt)
+with col4:
+    end_time = st.time_input("종료 시간", default_end_time)
+
+# 3. 검색 조건 선택
 search_mode = st.radio(
     "검색 조건 선택",
     ("키워드 완벽일치 (문구가 정확히 일치하는 뉴스만)", "키워드 모두 포함 (띄어쓰기 된 단어들이 모두 포함된 뉴스)"),
@@ -70,9 +73,9 @@ if st.button("🚀 스크랩 시작하기", use_container_width=True):
         st.warning("⚠️ 검색어를 입력해 주세요.")
     else:
         with st.spinner("🔄 데이터를 수집 중입니다... 잠시만 기다려주세요."):
-            # 날짜를 datetime 객체로 변환 및 시간 범위 최적화
-            start_datetime = datetime.combine(start_date, datetime.min.time())
-            end_datetime = datetime.combine(end_date, datetime.max.time())
+            # 선택한 날짜와 시간을 결합하여 datetime 객체 생성
+            start_datetime = datetime.combine(start_date, start_time)
+            end_datetime = datetime.combine(end_date, end_time)
             
             keyword_words = keyword.split()
             items = get_naver_news_bulk(keyword)
@@ -104,7 +107,9 @@ if st.button("🚀 스크랩 시작하기", use_container_width=True):
                     press_name = domain.replace("www.", "").split(".")[0]
 
                 pub_date_str = item['pubDate']
-                pub_date = datetime.strptime(pub_date_str[:-6], "%a, %d %b %Y %H:%M:%S")
+                # 네이버 API UTC 기준 시각을 한국 시간(KST, +9시간)으로 보정
+                pub_date_utc = datetime.strptime(pub_date_str[:-6], "%a, %d %b %Y %H:%M:%S")
+                pub_date = pub_date_utc + timedelta(hours=9)
                 
                 is_matched = False
                 if "완벽일치" in search_mode:
@@ -117,21 +122,20 @@ if st.button("🚀 스크랩 시작하기", use_container_width=True):
                 if is_matched:
                     if start_datetime <= pub_date <= end_datetime:
                         news_list.append({
-                            "뉴스 발행시간": pub_date.strftime("%Y-%m-%d %H:%M:%S"),
+                            "뉴스 발행시간": pub_date.strftime("%Y-%m-%d %H:%M"),
                             "언론사명": press_name,
                             "뉴스 제목": title,
                             "URL": item['originallink'] if item['originallink'] else item['link']
                         })
             
             if not news_list:
-                st.info("ℹ️ 지정한 기간 동안 조건에 맞는 뉴스가 없습니다.")
+                st.info(f"ℹ️ {start_datetime.strftime('%Y-%m-%d %H:%M')} ~ {end_datetime.strftime('%Y-%m-%d %H:%M')} 기간 동안 조건에 맞는 뉴스가 없습니다.")
             else:
                 df = pd.DataFrame(news_list)
                 df = df.drop_duplicates(subset=['URL'], keep='first')
                 df = df.sort_values(by="뉴스 발행시간", ascending=True)
                 df = df[["뉴스 발행시간", "언론사명", "뉴스 제목", "URL"]]
                 
-                # 파일을 하드디스크가 아닌 브라우저 다운로드 메모리(스트림)로 변환
                 excel_data = io.BytesIO()
                 with pd.ExcelWriter(excel_data, engine='openpyxl') as writer:
                     df.to_excel(writer, index=False)
@@ -139,8 +143,7 @@ if st.button("🚀 스크랩 시작하기", use_container_width=True):
                 
                 st.success(f"✨ 총 {len(df)}건의 뉴스 스크랩 완료!")
                 
-                # 웹 다운로드 버튼 활성화
-                file_name = f"{keyword}_뉴스_{now_dt.strftime('%Y-%m-%d')}.xlsx"
+                file_name = f"{keyword}_뉴스_{now_dt.strftime('%Y-%m-%d_%H%M')}.xlsx"
                 st.download_button(
                     label="📥 엑셀 파일 다운로드 받기",
                     data=excel_data,
@@ -149,8 +152,8 @@ if st.button("🚀 스크랩 시작하기", use_container_width=True):
                     use_container_width=True
                 )
 
-# 📄 5. 디자인 강화형 센터 정렬 하단 푸터 (수정 완료)
-st.markdown("<br><br><br>", unsafe_allow_html=True)  # 버튼과의 적당한 여백 확보
+# 📄 5. 하단 푸터
+st.markdown("<br><br><br>", unsafe_allow_html=True)
 st.markdown(
     """
     <div style="text-align: center; border-top: 1px solid #E0E0E0; padding-top: 20px;">
