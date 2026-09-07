@@ -9,12 +9,10 @@ import google.generativeai as genai
 CLIENT_ID = "JKZCSpCJtgKVj7pO4Uj7"
 CLIENT_SECRET = "UANQpOV5hX"
 
-# 💡 2. Gemini API 키 불러오기 (Streamlit Secrets 사용)
-try:
-    GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+# 💡 2. Gemini API 키 불러오기
+GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
+if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
-except Exception:
-    st.error("⚠️ Streamlit Secrets에 'GEMINI_API_KEY'가 설정되지 않았습니다.")
 
 def get_naver_news_bulk(keyword):
     url = "https://openapi.naver.com/v1/search/news.json"
@@ -37,8 +35,11 @@ def get_naver_news_bulk(keyword):
             break
     return all_items
 
-# 뉴스 URL 본문 크롤링 및 Gemini 2문장 요약 함수
+# 뉴스 URL 본문 크롤링 및 Gemini 2문장 요약 함수 (에러 상세 출력)
 def summarize_news(url, description):
+    if not GEMINI_API_KEY:
+        return "실패: API 키 미설정"
+
     content = ""
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
@@ -50,23 +51,27 @@ def summarize_news(url, description):
     except Exception:
         pass
     
-    # 크롤링 실패 시 API가 기본 제공하는 description 활용
     if not content or len(content) < 50:
         content = description
 
     prompt = f"다음 뉴스 내용을 정확히 두 문장으로 핵심만 간결하게 요약해 주세요:\n\n{content}"
     
-    # Gemini 모델 호환성 처리 (gemini-2.5-flash / gemini-1.5-flash)
-    for model_name in ['gemini-2.5-flash', 'gemini-1.5-flash']:
-        try:
-            model = genai.GenerativeModel(model_name)
-            response = model.generate_content(prompt)
-            time.sleep(0.5) # API 속도 제한 방지 대기
-            return response.text.strip()
-        except Exception:
-            continue
-            
-    return "요약 생성 실패"
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(prompt)
+        time.sleep(0.5)
+        return response.text.strip()
+    except Exception as e:
+        # 발생한 구체적 에러 메시지를 반환합니다.
+        err_msg = str(e)
+        if "API_KEY_INVALID" in err_msg or "API key not found" in err_msg:
+            return "실패: API 키 오류"
+        elif "RESOURCE_EXHAUSTED" in err_msg or "429" in err_msg:
+            return "실패: 호출 한도 초과"
+        elif "SERVICE_DISABLED" in err_msg or "PERMISSION_DENIED" in err_msg:
+            return "실패: API 서비스 미활성화"
+        else:
+            return f"실패: {type(e).__name__}"
 
 # 🖥️ 웹 화면 레이아웃 구성
 st.set_page_config(page_title="네이버 뉴스 맞춤 스크랩 시스템", page_icon="📰", layout="centered")
@@ -181,7 +186,7 @@ if st.button("🚀 스크랩 시작하기", use_container_width=True):
                     df.to_excel(writer, index=False)
                 excel_data.seek(0)
                 
-                st.success(f"✨ 총 {len(df)}건의 뉴스 스크랩 및 AI 요약 완료!")
+                st.success(f"✨ 총 {len(df)}건의 뉴스 스크랩 완료!")
                 
                 file_name = f"{keyword}_뉴스_{now_dt.strftime('%Y-%m-%d_%H%M')}.xlsx"
                 st.download_button(
