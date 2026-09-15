@@ -1,3 +1,9 @@
+st.set_page_config(
+    page_title="업무보고",  # <- 홈 화면 아이콘 이름이 '업무보고'가 됩니다.
+    page_icon="📝",
+    layout="centered",
+)
+
 from datetime import datetime
 import streamlit as st
 
